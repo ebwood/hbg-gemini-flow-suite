@@ -1,0 +1,16 @@
+.env
+outputs/
+__pycache__/
+*.pyc
+.DS_Store
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Authorization and browser state must never be committed.
+cookies.json
+auth/
+profile_*/
+chrome-profile/
+*.sqlite
+*.sqlite3

@@ -1,0 +1,240 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+compose_file="$script_dir/compose.yaml"
+env_file="$script_dir/.env"
+container_name=gemini-flow-suite
+state_dir="${HOME}/.gemini-flow-suite"
+
+if [ -f "$env_file" ]; then
+  set -a
+  . "$env_file"
+  set +a
+fi
+
+FLOW_CDP_PORT=${FLOW_CDP_PORT:-9223}
+GEMINI_CDP_PORT=${GEMINI_CDP_PORT:-9224}
+HOST_PROXY=${HOST_PROXY:-}
+
+compose() {
+  if [ -f "$env_file" ]; then
+    docker compose --env-file "$env_file" -f "$compose_file" "$@"
+  else
+    docker compose -f "$compose_file" "$@"
+  fi
+}
+
+ensure_up() {
+  if ! docker inspect --format '{{.State.Running}}' "$container_name" 2>/dev/null | grep -q '^true$'; then
+    compose up -d
+  fi
+}
+
+cdp_ready() {
+  curl -fsS "http://127.0.0.1:$1/json/version" >/dev/null 2>&1
+}
+
+stop_cdp_browser() {
+  port=$1
+  pid_file="$state_dir/chrome-${port}.pid"
+  if [ -s "$pid_file" ]; then
+    pid=$(sed -n '1p' "$pid_file" 2>/dev/null || true)
+    if [ -n "$pid" ]; then
+      kill "$pid" 2>/dev/null || true
+    fi
+    : >"$pid_file"
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    pids=$(lsof -ti "tcp:${port}" 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+      kill $pids 2>/dev/null || true
+      i=0
+      while cdp_ready "$port" && [ "$i" -lt 20 ]; do
+        i=$((i + 1))
+        sleep 0.25
+      done
+    fi
+  fi
+}
+
+chrome_binary() {
+  if [ "$(uname -s)" = "Darwin" ]; then
+    printf '%s\n' "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    return
+  fi
+  for candidate in google-chrome google-chrome-stable chromium chromium-browser; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      command -v "$candidate"
+      return
+    fi
+  done
+  echo "Google Chrome or Chromium was not found on the host." >&2
+  exit 1
+}
+
+start_chrome() {
+  profile=$1
+  port=$2
+  url=$3
+  mode=$4
+
+  mkdir -p "$profile"
+  if cdp_ready "$port"; then
+    return
+  fi
+
+  chrome=$(chrome_binary)
+  set -- \
+    "--remote-debugging-port=${port}" \
+    "--remote-debugging-address=$(if [ "$(uname -s)" = "Darwin" ]; then printf 127.0.0.1; else printf 0.0.0.0; fi)" \
+    "--remote-allow-origins=*" \
+    "--user-data-dir=${profile}" \
+    "--window-size=1920,1080" \
+    "--password-store=basic" \
+    "--no-first-run" \
+    "--no-default-browser-check"
+  if [ -n "$HOST_PROXY" ]; then
+    set -- "$@" "--proxy-server=${HOST_PROXY}"
+  fi
+  if [ "$mode" = "headless" ]; then
+    set -- "$@" "--headless=new"
+  fi
+
+  "$chrome" "$@" "$url" >"/tmp/gemini-flow-chrome-${port}.log" 2>&1 &
+  printf '%s\n' "$!" >"$state_dir/chrome-${port}.pid"
+
+  i=0
+  while [ "$i" -lt 40 ]; do
+    if cdp_ready "$port"; then
+      return
+    fi
+    i=$((i + 1))
+    sleep 0.5
+  done
+  echo "Chrome CDP did not become ready on port ${port}." >&2
+  exit 1
+}
+
+exec_suite() {
+  ensure_up
+  if [ -t 0 ] && [ -t 1 ]; then
+    docker exec -it "$container_name" media-suite "$@"
+  else
+    docker exec "$container_name" media-suite "$@"
+  fi
+}
+
+authorize() {
+  provider=$1
+  ensure_up
+  case "$provider" in
+    gemini)
+      port=$GEMINI_CDP_PORT
+      profile="$state_dir/gemini-chrome"
+      url="https://gemini.google.com/"
+      target="/data/auth/gemini/cookies.json"
+      ;;
+    flow)
+      port=$FLOW_CDP_PORT
+      profile="$state_dir/flow-chrome"
+      url="https://labs.google/fx/tools/flow?hl=en"
+      target="/data/gflow"
+      ;;
+    *)
+      echo "usage: $0 auth gemini|flow" >&2
+      exit 2
+      ;;
+  esac
+
+  stop_cdp_browser "$port"
+  start_chrome "$profile" "$port" "$url" visible
+  echo "Complete the ${provider} login in the opened Chrome window."
+  printf 'After the target page is fully available, press Enter here: '
+  read -r _
+
+  endpoint="http://host.docker.internal:${port}"
+  if docker exec "$container_name" \
+    /opt/gflow-venv/bin/python /app/sync_auth.py "$provider" "$endpoint" "$target"; then
+    auth_status=0
+  else
+    auth_status=$?
+  fi
+  stop_cdp_browser "$port"
+  [ "$auth_status" -eq 0 ] || return "$auth_status"
+  echo "${provider} authorization completed."
+}
+
+usage() {
+  cat <<'EOF'
+Usage:
+  suite up|down|build|logs|status
+  suite auth gemini
+  suite auth flow
+  suite gemini image "prompt" [options]
+  suite gemini video "prompt" [options]
+  suite flow image t2i "prompt" [gflow options]
+  suite flow image i2i "prompt" --ref /workspace/input.png [gflow options]
+  suite flow video t2v "prompt" [gflow options]
+  suite flow video i2v --initial-frame /workspace/start.png "prompt" [options]
+  suite flow video r2v "prompt" --ref /workspace/ref.png [options]
+  suite flow raw <any gflow command>
+  suite clean image|video INPUT OUTPUT
+EOF
+}
+
+command=${1:-}
+[ -n "$command" ] || { usage; exit 2; }
+shift || true
+
+case "$command" in
+  up)
+    compose up -d --build
+    ;;
+  down)
+    compose down
+    ;;
+  build)
+    compose build
+    ;;
+  logs)
+    compose logs -f --tail=200
+    ;;
+  status)
+    exec_suite status
+    ;;
+  auth)
+    authorize "${1:-}"
+    ;;
+  flow)
+    case "${1:-}" in
+      image|video|project|scene|character|instructions)
+        start_chrome "$state_dir/flow-chrome" "$FLOW_CDP_PORT" \
+          "https://labs.google/fx/tools/flow?hl=en" headless
+        ;;
+    esac
+    if exec_suite flow "$@"; then
+      flow_status=0
+    else
+      flow_status=$?
+    fi
+    stop_cdp_browser "$FLOW_CDP_PORT"
+    exit "$flow_status"
+    ;;
+  gemini|clean)
+    exec_suite "$command" "$@"
+    ;;
+  shell)
+    ensure_up
+    exec docker exec -it "$container_name" /bin/bash
+    ;;
+  install-cli)
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$script_dir/suite" "$HOME/.local/bin/gemini-flow"
+    echo "Installed: $HOME/.local/bin/gemini-flow"
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac

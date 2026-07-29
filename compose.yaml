@@ -1,0 +1,57 @@
+name: gemini-flow-suite
+
+services:
+  media-suite:
+    image: local/gemini-flow-suite:latest
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile
+      platforms:
+        - linux/amd64
+      args:
+        GFLOW_VERSION: ${GFLOW_VERSION:-0.43.0}
+        REMOVE_AI_WATERMARKS_VERSION: ${REMOVE_AI_WATERMARKS_VERSION:-0.19.0}
+        VEO_VERSION: ${VEO_VERSION:-v0.6.4-demo}
+        VEO_ARCHIVE: ${VEO_ARCHIVE:-GeminiWatermarkTool-Linux-x64-Video.zip}
+        VEO_SHA256: ${VEO_SHA256:-dd6d27547cee59555a87e720c8ef41c68373d78f94356cca31ab817b43d74f9b}
+    container_name: gemini-flow-suite
+    shm_size: 2gb
+    restart: unless-stopped
+    environment:
+      DISPLAY: :99
+      NOVNC_PASSWORD: ${NOVNC_PASSWORD:?set NOVNC_PASSWORD in .env}
+      GFLOW_CLI_HOME: /data/gflow
+      GFLOW_CLI_OUTPUT_DIR: /data/outputs/flow
+      GFLOW_CLI_HEADLESS: ${GFLOW_CLI_HEADLESS:-true}
+      GFLOW_CLI_PREFER_CLASSIC: ${GFLOW_CLI_PREFER_CLASSIC:-true}
+      GFLOW_CLI_CDP_ENDPOINT: http://host.docker.internal:${FLOW_CDP_PORT:-9223}
+      GFLOW_CLI_PROXY_SERVER: ${CONTAINER_PROXY:-}
+      HTTP_PROXY: ${CONTAINER_PROXY:-}
+      HTTPS_PROXY: ${CONTAINER_PROXY:-}
+      NO_PROXY: localhost,127.0.0.1,::1,host.docker.internal,192.168.65.254
+      GEMINI_COOKIE_FILE: /data/auth/gemini/cookies.json
+      GEMINI_REQUEST_TIMEOUT: ${GEMINI_REQUEST_TIMEOUT:-900}
+      GEMINI_DOWNLOAD_TIMEOUT: ${GEMINI_DOWNLOAD_TIMEOUT:-1200}
+      GEMINI_IMAGE_FULL_SIZE: ${GEMINI_IMAGE_FULL_SIZE:-true}
+      GEMINI_AUTO_REDO: ${GEMINI_AUTO_REDO:-true}
+      GEMINI_REDO_MODEL: ${GEMINI_REDO_MODEL:-gemini-3-flash}
+      GEMINI_REMOVE_WATERMARKS: ${REMOVE_VISIBLE_WATERMARKS:-true}
+      GEMINI_KEEP_ORIGINALS: ${KEEP_ORIGINALS:-false}
+      GEMINI_IMAGE_CLEAN_BACKEND: ${IMAGE_CLEAN_BACKEND:-migan}
+      MEDIA_OUTPUT_ROOT: /data/outputs
+      REMOVE_VISIBLE_WATERMARKS: ${REMOVE_VISIBLE_WATERMARKS:-true}
+      KEEP_ORIGINALS: ${KEEP_ORIGINALS:-false}
+      IMAGE_CLEAN_BACKEND: ${IMAGE_CLEAN_BACKEND:-migan}
+    ports:
+      - 127.0.0.1:${NOVNC_PORT:-7900}:7900
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - suite-data:/data
+      - ${HOST_OUTPUT_DIR:-./outputs}:/data/outputs
+      - ${HOST_WORKSPACE_DIR:-.}:/workspace:ro
+
+volumes:
+  suite-data:
+    name: gemini-flow-suite-data

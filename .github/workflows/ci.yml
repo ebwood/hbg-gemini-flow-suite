@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      NOVNC_PASSWORD: ci-only-password
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Python syntax
+        run: python -m compileall -q suite_cli.py media_cleanup.py sync_auth.py sitecustomize.py
+
+      - name: Shell syntax
+        run: sh -n suite start-desktop.sh
+
+      - name: Secret and auth-file audit
+        run: python scripts/check_secrets.py
+
+      - name: Docker Compose validation
+        run: docker compose --env-file .env.example config --quiet
