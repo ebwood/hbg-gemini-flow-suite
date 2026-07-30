@@ -9,4 +9,4 @@ upstream branch: master
 upstream commit: fbe0790599ac8ee77692dabdce88a96110a33294
 ```
 
-The snapshot includes local compatibility changes used by Gemini Flow Suite. Compare this directory with the recorded upstream commit when updating it, preserve the upstream `LICENSE`, and document material changes in the pull request.
+The snapshot includes local compatibility changes used by HBG Gemini Flow Suite. Compare this directory with the recorded upstream commit when updating it, preserve the upstream `LICENSE`, and document material changes in the pull request.

@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping keep Gemini Flow Suite useful as Gemini Web and Flow evolve.
+Thanks for helping keep HBG Gemini Flow Suite useful as Gemini Web and Flow evolve.
 
 ## Development workflow
 

@@ -1,9 +1,11 @@
 <p align="center">
-  <img src="docs/showcase/hero.png" alt="Gemini Flow Suite" width="100%" />
+  <img src="docs/showcase/hero.png" alt="HBG Gemini Flow Suite" width="100%" />
 </p>
 
+<h1 align="center">HBG Gemini Flow Suite</h1>
+
 <p align="center">
-  <a href="https://github.com/Mr-funny/gemini-flow-suite/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Mr-funny/gemini-flow-suite/ci.yml?branch=main&style=flat-square&label=CI" alt="CI" /></a>
+  <a href="https://github.com/Mr-funny/hbg-gemini-flow-suite/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Mr-funny/hbg-gemini-flow-suite/ci.yml?branch=main&style=flat-square&label=CI" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-663399?style=flat-square" alt="AGPL-3.0 License" /></a>
   <img src="https://img.shields.io/badge/Docker-ready-2496ed?style=flat-square&logo=docker&logoColor=white" alt="Docker ready" />
   <img src="https://img.shields.io/badge/Python-3.12-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python 3.12" />
@@ -25,7 +27,7 @@
 把下面整段话发给 Codex、Claude Code，或其他能操作本机终端的 Agent：
 
 ```text
-请从 https://github.com/Mr-funny/gemini-flow-suite 部署 Gemini Flow Suite。
+请从 https://github.com/Mr-funny/hbg-gemini-flow-suite 部署 HBG Gemini Flow Suite。
 
 检查 Docker、Docker Compose、Google Chrome/Chromium，复制 .env.example 为 .env，
 提醒我设置新的 NOVNC_PASSWORD。启动后不要读取、打印或上传任何 Cookie、Chrome
@@ -71,8 +73,8 @@ Agent 可以完成环境检查和容器部署；Gemini 与 Flow 登录必须由�
 ### 2. 克隆并启动
 
 ```bash
-git clone https://github.com/Mr-funny/gemini-flow-suite.git
-cd gemini-flow-suite
+git clone https://github.com/Mr-funny/hbg-gemini-flow-suite.git
+cd hbg-gemini-flow-suite
 cp .env.example .env
 
 # 编辑 .env，至少修改 NOVNC_PASSWORD。

@@ -1,6 +1,6 @@
 # Third-party notices
 
-Gemini Flow Suite combines original integration code with upstream open-source projects and one build-time binary dependency.
+HBG Gemini Flow Suite combines original integration code with upstream open-source projects and one build-time binary dependency.
 
 ## Gemini-API
 
@@ -9,7 +9,7 @@ Gemini Flow Suite combines original integration code with upstream open-source p
 - Location: `vendor/Gemini-API/`
 - Role: reverse-engineered Gemini Web client, media response parsing and downloads
 
-The vendored source retains its upstream `LICENSE`. Because this repository directly includes and integrates that AGPL-3.0 code, Gemini Flow Suite is distributed under AGPL-3.0.
+The vendored source retains its upstream `LICENSE`. Because this repository directly includes and integrates that AGPL-3.0 code, HBG Gemini Flow Suite is distributed under AGPL-3.0.
 
 ## gflow-cli
 

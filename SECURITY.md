@@ -8,7 +8,7 @@ Security fixes are applied to the latest commit on the `main` branch.
 
 Please report vulnerabilities privately through GitHub Security Advisories:
 
-<https://github.com/Mr-funny/gemini-flow-suite/security/advisories/new>
+<https://github.com/Mr-funny/hbg-gemini-flow-suite/security/advisories/new>
 
 Do not include real Google cookies, Chrome profiles, account screenshots, generated history, proxy credentials, or Docker volume exports in a public Issue.
 
@@ -21,7 +21,7 @@ A useful report contains:
 
 ## Local security model
 
-Gemini Flow Suite is designed for a single trusted user on a local workstation.
+HBG Gemini Flow Suite is designed for a single trusted user on a local workstation.
 
 - noVNC is bound to `127.0.0.1` by default.
 - Google authorization is persisted in the Docker named volume `gemini-flow-suite-data`.
