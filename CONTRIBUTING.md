@@ -10,10 +10,11 @@ Thanks for helping keep HBG Gemini Flow Suite useful as Gemini Web and Flow evol
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 -m compileall -q suite_cli.py media_cleanup.py sync_auth.py sitecustomize.py
+python3 -m compileall -q suite_cli.py media_cleanup.py sync_auth.py sitecustomize.py scripts/cdp_bridge.py
 sh -n suite start-desktop.sh
 python3 scripts/check_secrets.py
 NOVNC_PASSWORD=local-test docker compose --env-file .env.example config --quiet
+python3 ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py .
 ```
 
 4. If a change touches browser automation, describe the tested Flow UI mode, locale and date.

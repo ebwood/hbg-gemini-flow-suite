@@ -15,6 +15,10 @@ fi
 
 FLOW_CDP_PORT=${FLOW_CDP_PORT:-9223}
 GEMINI_CDP_PORT=${GEMINI_CDP_PORT:-9224}
+FLOW_CDP_BRIDGE_PORT=${FLOW_CDP_BRIDGE_PORT:-19223}
+GEMINI_CDP_BRIDGE_PORT=${GEMINI_CDP_BRIDGE_PORT:-19224}
+FLOW_RUNNER_MODE=${FLOW_RUNNER_MODE:-auto}
+GFLOW_VERSION=${GFLOW_VERSION:-0.53.1}
 HOST_PROXY=${HOST_PROXY:-}
 
 compose() {
@@ -33,6 +37,87 @@ ensure_up() {
 
 cdp_ready() {
   curl -fsS "http://127.0.0.1:$1/json/version" >/dev/null 2>&1
+}
+
+stop_cdp_bridge() {
+  bridge_port=$1
+  pid_file="$state_dir/cdp-bridge-${bridge_port}.pid"
+  if [ -s "$pid_file" ]; then
+    pid=$(sed -n '1p' "$pid_file" 2>/dev/null || true)
+    if [ -n "$pid" ]; then
+      kill "$pid" 2>/dev/null || true
+    fi
+    : >"$pid_file"
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    pids=$(lsof -ti "tcp:${bridge_port}" 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+      kill $pids 2>/dev/null || true
+    fi
+  fi
+}
+
+start_cdp_bridge() {
+  target_port=$1
+  bridge_port=$2
+  stop_cdp_bridge "$bridge_port"
+  python3 "$script_dir/scripts/cdp_bridge.py" \
+    --listen-port "$bridge_port" --target-port "$target_port" \
+    >"/tmp/gemini-flow-cdp-bridge-${bridge_port}.log" 2>&1 &
+  printf '%s\n' "$!" >"$state_dir/cdp-bridge-${bridge_port}.pid"
+
+  i=0
+  while [ "$i" -lt 40 ]; do
+    if curl -fsS "http://127.0.0.1:${bridge_port}/json/version" >/dev/null 2>&1; then
+      return
+    fi
+    i=$((i + 1))
+    sleep 0.25
+  done
+  echo "Chrome CDP bridge did not become ready on port ${bridge_port}." >&2
+  exit 1
+}
+
+docker_cdp_endpoint() {
+  target_port=$1
+  bridge_port=$2
+  if [ "$(uname -s)" != "Darwin" ]; then
+    CDP_ENDPOINT="http://host.docker.internal:${target_port}"
+    return
+  fi
+
+  start_cdp_bridge "$target_port" "$bridge_port"
+  browser_path=$(curl -fsS "http://127.0.0.1:${target_port}/json/version" \
+    | sed -n 's#.*"webSocketDebuggerUrl": "ws://[^/]*\(/devtools/browser/[^"]*\)".*#\1#p')
+  if [ -z "$browser_path" ]; then
+    echo "Could not resolve the Chrome CDP browser WebSocket path." >&2
+    exit 1
+  fi
+  CDP_ENDPOINT="ws://host.docker.internal:${bridge_port}${browser_path}"
+}
+
+use_arm64_flow_runner() {
+  case "$FLOW_RUNNER_MODE" in
+    arm64) return 0 ;;
+    amd64) return 1 ;;
+    auto)
+      case "$(uname -m)" in
+        arm64|aarch64) return 0 ;;
+        *) return 1 ;;
+      esac
+      ;;
+    *)
+      echo "FLOW_RUNNER_MODE must be auto, arm64, or amd64." >&2
+      exit 2
+      ;;
+  esac
+}
+
+ensure_flow_runner() {
+  image="local/hbg-gflow-arm64:${GFLOW_VERSION}"
+  if ! docker image inspect "$image" >/dev/null 2>&1; then
+    compose --profile flow-arm64 build flow-runner
+  fi
 }
 
 stop_cdp_browser() {
@@ -125,6 +210,35 @@ exec_suite() {
   fi
 }
 
+exec_suite_cdp() {
+  endpoint=$1
+  shift
+  ensure_up
+  if [ -t 0 ] && [ -t 1 ]; then
+    docker exec -it -e GFLOW_CLI_CDP_ENDPOINT="$endpoint" \
+      "$container_name" media-suite "$@"
+  else
+    docker exec -e GFLOW_CLI_CDP_ENDPOINT="$endpoint" \
+      "$container_name" media-suite "$@"
+  fi
+}
+
+exec_arm64_flow() {
+  endpoint=$1
+  shift
+  ensure_flow_runner
+  if [ "${1:-}" = "raw" ]; then
+    shift
+  fi
+  if [ -n "$endpoint" ]; then
+    compose --profile flow-arm64 run --rm --no-deps \
+      -e GFLOW_CLI_CDP_ENDPOINT="$endpoint" \
+      flow-runner "$@"
+  else
+    compose --profile flow-arm64 run --rm --no-deps flow-runner "$@"
+  fi
+}
+
 authorize() {
   provider=$1
   ensure_up
@@ -134,12 +248,14 @@ authorize() {
       profile="$state_dir/gemini-chrome"
       url="https://gemini.google.com/"
       target="/data/auth/gemini/cookies.json"
+      bridge_port=$GEMINI_CDP_BRIDGE_PORT
       ;;
     flow)
       port=$FLOW_CDP_PORT
       profile="$state_dir/flow-chrome"
       url="https://labs.google/fx/tools/flow?hl=en"
       target="/data/gflow"
+      bridge_port=$FLOW_CDP_BRIDGE_PORT
       ;;
     *)
       echo "usage: $0 auth gemini|flow" >&2
@@ -153,13 +269,27 @@ authorize() {
   printf 'After the target page is fully available, press Enter here: '
   read -r _
 
-  endpoint="http://host.docker.internal:${port}"
-  if docker exec "$container_name" \
+  docker_cdp_endpoint "$port" "$bridge_port"
+  endpoint=$CDP_ENDPOINT
+  if [ "$provider" = "flow" ] && use_arm64_flow_runner; then
+    ensure_flow_runner
+    if compose --profile flow-arm64 run --rm --no-deps \
+      --entrypoint sh \
+      -e GFLOW_SYNC_ENDPOINT="$endpoint" \
+      flow-runner -lc \
+      'xvfb-run -a -s "-screen 0 1440x1000x24" /opt/gflow-venv/bin/python /app/sync_auth.py flow "$GFLOW_SYNC_ENDPOINT" /data/gflow'; then
+      auth_status=0
+    else
+      auth_status=$?
+    fi
+  elif docker exec "$container_name" \
+    xvfb-run -a -s "-screen 0 1440x1000x24" \
     /opt/gflow-venv/bin/python /app/sync_auth.py "$provider" "$endpoint" "$target"; then
     auth_status=0
   else
     auth_status=$?
   fi
+  stop_cdp_bridge "$bridge_port"
   stop_cdp_browser "$port"
   [ "$auth_status" -eq 0 ] || return "$auth_status"
   echo "${provider} authorization completed."
@@ -196,6 +326,9 @@ case "$command" in
     ;;
   build)
     compose build
+    if use_arm64_flow_runner; then
+      compose --profile flow-arm64 build flow-runner
+    fi
     ;;
   logs)
     compose logs -f --tail=200
@@ -207,18 +340,36 @@ case "$command" in
     authorize "${1:-}"
     ;;
   flow)
+    endpoint=
     case "${1:-}" in
       image|video|project|scene|character|instructions)
         start_chrome "$state_dir/flow-chrome" "$FLOW_CDP_PORT" \
           "https://labs.google/fx/tools/flow?hl=en" headless
+        docker_cdp_endpoint "$FLOW_CDP_PORT" "$FLOW_CDP_BRIDGE_PORT"
+        endpoint=$CDP_ENDPOINT
         ;;
     esac
-    if exec_suite flow "$@"; then
-      flow_status=0
+    if use_arm64_flow_runner; then
+      if exec_arm64_flow "$endpoint" "$@"; then
+        flow_status=0
+      else
+        flow_status=$?
+      fi
+    elif [ -n "$endpoint" ]; then
+      if exec_suite_cdp "$endpoint" flow "$@"; then
+        flow_status=0
+      else
+        flow_status=$?
+      fi
+    elif exec_suite flow "$@"; then
+        flow_status=0
     else
       flow_status=$?
     fi
-    stop_cdp_browser "$FLOW_CDP_PORT"
+    if [ -n "$endpoint" ]; then
+      stop_cdp_bridge "$FLOW_CDP_BRIDGE_PORT"
+      stop_cdp_browser "$FLOW_CDP_PORT"
+    fi
     exit "$flow_status"
     ;;
   gemini|clean)

@@ -154,6 +154,21 @@ async def main() -> int:
         os.environ.get(legacy_prompt_name, default_prompts[media_type]),
     ).strip()
     model = os.environ.get("GEMINI_MODEL", "").strip()
+    input_files_raw = os.environ.get("GEMINI_INPUT_FILES", "[]")
+    try:
+        input_files_value = json.loads(input_files_raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("GEMINI_INPUT_FILES must be a JSON array") from exc
+    if not isinstance(input_files_value, list) or not all(
+        isinstance(item, str) and item.strip() for item in input_files_value
+    ):
+        raise ValueError("GEMINI_INPUT_FILES must contain non-empty path strings")
+    input_files = [str(Path(item)) for item in input_files_value]
+    missing_input_files = [item for item in input_files if not Path(item).is_file()]
+    if missing_input_files:
+        raise FileNotFoundError(
+            "Gemini input file not found inside container: " + ", ".join(missing_input_files)
+        )
     redo_model = os.environ.get("GEMINI_REDO_MODEL", "gemini-3-flash").strip()
     request_timeout = float(os.environ.get("GEMINI_REQUEST_TIMEOUT", "900"))
     download_timeout = float(os.environ.get("GEMINI_DOWNLOAD_TIMEOUT", "1200"))
@@ -170,6 +185,7 @@ async def main() -> int:
         "media_type": media_type,
         "model": model or "auto",
         "prompt": prompt if action == "generate" else None,
+        "input_files": input_files,
         "status": "starting",
         "saved": [],
         "automatic_watermark_cleanup": remove_watermarks,
@@ -211,6 +227,8 @@ async def main() -> int:
             "prompt": prompt,
             "temporary": False,
         }
+        if input_files:
+            generate_kwargs["files"] = input_files
         if model:
             generate_kwargs["model"] = model
 

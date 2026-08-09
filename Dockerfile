@@ -16,7 +16,7 @@ RUN apt-get update \
 
 FROM --platform=linux/amd64 python:3.12-slim-bookworm
 
-ARG GFLOW_VERSION=0.43.0
+ARG GFLOW_VERSION=0.53.1
 ARG REMOVE_AI_WATERMARKS_VERSION=0.19.0
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -36,7 +36,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
       ca-certificates chromium curl ffmpeg fluxbox fonts-noto-cjk fonts-liberation \
       libdbus-1-3 libgl1 libgomp1 libstdc++6 novnc procps tini websockify \
-      x11vnc xvfb \
+      x11vnc xauth xvfb \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /opt/google/chrome \
     && ln -sf /usr/bin/chromium /opt/google/chrome/chrome \

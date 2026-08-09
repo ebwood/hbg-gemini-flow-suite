@@ -1,0 +1,34 @@
+FROM python:3.12-slim-bookworm
+
+ARG GFLOW_VERSION=0.53.1
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    GFLOW_CLI_HOME=/data/gflow \
+    GFLOW_CLI_OUTPUT_DIR=/data/outputs/flow \
+    GFLOW_CLI_HEADLESS=true \
+    GFLOW_CLI_PREFER_CLASSIC=true
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+      ca-certificates chromium chromium-sandbox tini xauth xvfb \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /opt/google/chrome /data/gflow /data/outputs /workspace \
+    && ln -sf /usr/bin/chromium /opt/google/chrome/chrome \
+    && python3 -m venv /opt/gflow-venv \
+    && /opt/gflow-venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && /opt/gflow-venv/bin/pip install --no-cache-dir "gflow-cli==${GFLOW_VERSION}"
+
+COPY sitecustomize.py /tmp/gflow-container-hooks.py
+COPY gflow_container_hooks.pth /tmp/gflow_container_hooks.pth
+COPY sync_auth.py /app/sync_auth.py
+
+RUN site_packages="$(/opt/gflow-venv/bin/python -c 'import site; print(site.getsitepackages()[0])')" \
+    && install -m 0644 /tmp/gflow-container-hooks.py "${site_packages}/gflow_container_hooks.py" \
+    && install -m 0644 /tmp/gflow_container_hooks.pth "${site_packages}/gflow_container_hooks.pth" \
+    && ln -s /opt/gflow-venv/bin/gflow /usr/local/bin/gflow
+
+WORKDIR /data/outputs
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/opt/gflow-venv/bin/gflow"]

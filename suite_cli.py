@@ -154,6 +154,7 @@ def gemini_command(media_type: str, args: argparse.Namespace) -> int:
             "GEMINI_PROMPT": args.prompt,
             "GEMINI_OUTPUT_DIR": str(output_dir),
             "GEMINI_MODEL": args.model or "",
+            "GEMINI_INPUT_FILES": json.dumps(args.image or [], ensure_ascii=False),
             "GEMINI_REMOVE_WATERMARKS": "false" if args.no_clean else "true",
             "GEMINI_KEEP_ORIGINALS": "true" if args.keep_originals else env.get("KEEP_ORIGINALS", "false"),
         }
@@ -206,6 +207,12 @@ def build_parser() -> argparse.ArgumentParser:
         item = gemini_sub.add_parser(media_type)
         item.add_argument("prompt")
         item.add_argument("--model", default="")
+        item.add_argument(
+            "--image",
+            action="append",
+            default=[],
+            help="Attach an input image inside the container, for example /workspace/start.png. Repeatable.",
+        )
         item.add_argument("--out-dir")
         item.add_argument("--keep-originals", action="store_true")
         item.add_argument("--no-clean", action="store_true")

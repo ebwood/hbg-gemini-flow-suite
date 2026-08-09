@@ -15,7 +15,7 @@ The vendored source retains its upstream `LICENSE`. Because this repository dire
 
 - Project: <https://github.com/ffroliva/gflow-cli>
 - License: MIT
-- Pinned version: `0.43.0`
+- Pinned version: `0.53.1`
 - Role: Flow browser automation and image/video commands
 
 The package is installed during the Docker build. Its installed distribution includes the MIT license text.

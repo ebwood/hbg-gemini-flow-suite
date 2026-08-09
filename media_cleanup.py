@@ -71,30 +71,53 @@ def clean_video(source: Path, output: Path) -> Path:
     diamond_clean = output.parent / f".{output.stem}.diamond-clean{output.suffix}"
 
     try:
-        run_checked(
-            [
-                VEO_WATERMARK_REMOVER,
-                "--no-banner",
-                "--veo",
-                "--mark",
-                "auto",
-                "--input",
-                str(source),
-                "--output",
-                str(visible_clean),
-            ]
+        visible_command = [
+            VEO_WATERMARK_REMOVER,
+            "--no-banner",
+            "--veo",
+            "--mark",
+            "auto",
+            "--input",
+            str(source),
+            "--output",
+            str(visible_clean),
+        ]
+        print(f"Running media cleanup: {' '.join(visible_command)}", flush=True)
+        visible_result = subprocess.run(
+            visible_command,
+            text=True,
+            capture_output=True,
         )
-        if not visible_clean.is_file():
-            raise RuntimeError(
-                f"Visible video watermark cleanup produced no output: {visible_clean}"
-            )
+        if visible_result.stdout:
+            print(visible_result.stdout, end="", flush=True)
+        if visible_result.stderr:
+            print(visible_result.stderr, end="", flush=True)
 
-        metadata_source = visible_clean
-        if "gemini_web_video" in source.name:
+        visible_log = f"{visible_result.stdout}\n{visible_result.stderr}"
+        skipped_no_mark = visible_result.returncode == 1 and "[SKIP]" in visible_log
+        if visible_result.returncode != 0 and not skipped_no_mark:
+            raise subprocess.CalledProcessError(visible_result.returncode, visible_command)
+
+        if skipped_no_mark:
+            # The remover uses exit 1 when auto-detection correctly finds no
+            # visible mark and intentionally writes no intermediate file.  It
+            # is still a valid generated video; continue with metadata cleanup
+            # directly from the original instead of discarding the download.
+            metadata_source = source
+        else:
+            if not visible_clean.is_file():
+                raise RuntimeError(
+                    f"Visible video watermark cleanup produced no output: {visible_clean}"
+                )
+            metadata_source = visible_clean
+        first_pass_removed_diamond = "Auto watermark type: Gemini diamond" in visible_log
+        if "gemini_web_video" in source.name and not first_pass_removed_diamond:
             # Gemini Web's 3.5 diamond can move farther inward than the stable
             # auto profile expects. A second bottom-right snap pass catches the
             # residual mark that can otherwise survive while the first pass
-            # still reports success.
+            # still reports success. Do not run it when the first pass already
+            # identified and removed the diamond; forcing the same detector a
+            # second time correctly finds nothing and returns a failure code.
             run_checked(
                 [
                     VEO_WATERMARK_REMOVER,
@@ -109,7 +132,7 @@ def clean_video(source: Path, output: Path) -> Path:
                     "--denoise",
                     "ai",
                     "--input",
-                    str(visible_clean),
+                    str(metadata_source),
                     "--output",
                     str(diamond_clean),
                 ]

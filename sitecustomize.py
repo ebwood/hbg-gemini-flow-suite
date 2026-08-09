@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import socket
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 
 def _proxy_server() -> str | None:
@@ -31,7 +34,7 @@ except Exception:
 
 # Flow's July 2026 editor cohort changed the I2V Start/End frame slots from
 # custom ``div[type=button]`` elements to native iconless ``button`` elements.
-# gflow-cli 0.43.0 still carries only the older selector, so extend it without
+# Some gflow releases still carry only the older selector, so extend it without
 # removing backward compatibility. Settings/menu buttons contain Material
 # Symbols icons; excluding those keeps the positional pair limited to the two
 # frame slots after the settings popover closes.
@@ -42,6 +45,32 @@ try:
         "div[type='button'][aria-haspopup='dialog'], "
         "button[aria-haspopup='dialog']:not(:has(i.google-symbols))"
     )
+except Exception:
+    pass
+
+
+# Flow's August 2026 editor labels the single-output tab ``x1``.  gflow-cli
+# Older automation probes only the ``1x`` spelling, then silently leaves the
+# editor default (x2) in place and doubles credit use.  Select the requested
+# count using both labels and fail closed if no unique tab can be found.
+try:
+    from gflow_cli.api.transports.ui_automation_video import VideoGenerationMixin
+
+    async def _set_output_count_current_ui(
+        page, n, out_dir=None  # type: ignore[no-untyped-def]
+    ):
+        labels = ("x1", "1x") if n == 1 else (f"x{n}",)
+        for label in labels:
+            tab = page.locator(f"[role='tab']:text-is('{label}')")
+            if await tab.count() == 1:
+                await tab.click()
+                await page.wait_for_timeout(400)
+                return
+        raise RuntimeError(
+            f"Flow output-count tab for x{n} was not found; refusing to risk duplicate credit use"
+        )
+
+    VideoGenerationMixin._set_output_count = staticmethod(_set_output_count_current_ui)
 except Exception:
     pass
 
@@ -62,10 +91,30 @@ try:
     _original_launch_persistent_context = BrowserType.launch_persistent_context
     _original_context_close = BrowserContext.close
 
+    def _clear_container_singletons(args, kwargs):  # type: ignore[no-untyped-def]
+        if os.environ.get("GFLOW_CONTAINER_CLEAR_STALE_SINGLETONS", "").lower() != "true":
+            return False
+        raw_dir = kwargs.get("user_data_dir")
+        if raw_dir is None and args:
+            raw_dir = args[0]
+        if not raw_dir:
+            return False
+        profile_dir = Path(str(raw_dir))
+        cleared = False
+        for name in ("SingletonCookie", "SingletonSocket", "SingletonLock"):
+            target = profile_dir / name
+            try:
+                if target.exists() or target.is_symlink():
+                    target.unlink()
+                    cleared = True
+            except OSError:
+                pass
+        return cleared
+
     async def _launch_or_attach(self, *args, **kwargs):  # type: ignore[no-untyped-def]
         endpoint = _resolved_cdp_endpoint()
         if not endpoint or self.name != "chromium":
-            # gflow-cli 0.43.0 deliberately removes Playwright's default
+            # gflow deliberately removes Playwright's default
             # ``--no-sandbox`` flag.  The suite runs Chromium as root inside a
             # Docker container, where Chromium exits immediately unless the
             # flag is restored.  Keep the upstream hardening everywhere else,
@@ -79,7 +128,19 @@ try:
             kwargs["ignore_default_args"] = [
                 value for value in ignored if value != "--no-sandbox"
             ]
-            return await _original_launch_persistent_context(self, *args, **kwargs)
+            if _clear_container_singletons(args, kwargs):
+                # The cookie pre-read fallback closes its temporary Chromium
+                # context immediately before the real generation context. On
+                # Docker Desktop the process can outlive the lock symlink by a
+                # short interval, so give it time to exit before relaunching.
+                await asyncio.sleep(2)
+                _clear_container_singletons(args, kwargs)
+            try:
+                return await _original_launch_persistent_context(self, *args, **kwargs)
+            except Exception as exc:
+                if os.environ.get("GFLOW_CONTAINER_DEBUG_LAUNCH", "").lower() == "true":
+                    print(f"GFLOW_CONTAINER_BROWSER_LAUNCH_ERROR\n{exc}", file=sys.stderr, flush=True)
+                raise
         browser = await self.connect_over_cdp(endpoint)
         contexts = browser.contexts
         context = contexts[0] if contexts else await browser.new_context()
@@ -93,6 +154,37 @@ try:
 
     BrowserType.launch_persistent_context = _launch_or_attach
     BrowserContext.close = _close_without_stopping_host_chrome
+except Exception:
+    pass
+
+
+# The Linux profile already uses Chromium's basic password store.  gflow's
+# cross-platform cookie pre-read fallback opens a short-lived second browser on
+# the same profile immediately before the real generation browser; on Docker
+# Desktop that process can still own the profile when the real launch begins.
+# Allow the arm64-only runner to skip that redundant pre-read and let the real
+# persistent context load the cookie jar directly.
+try:
+    from gflow_cli.api.client import FlowApiClient
+
+    _original_preread_flow_session_cookies = FlowApiClient._preread_flow_session_cookies
+
+    async def _container_preread_flow_session_cookies(self):  # type: ignore[no-untyped-def]
+        if os.environ.get("GFLOW_CONTAINER_SKIP_COOKIE_PREREAD", "").lower() == "true":
+            self._preread_flow_cookies = {}
+            return
+        await _original_preread_flow_session_cookies(self)
+        if os.environ.get("GFLOW_CONTAINER_CLEAR_STALE_SINGLETONS", "").lower() == "true":
+            await asyncio.sleep(2)
+            for name in ("SingletonCookie", "SingletonSocket", "SingletonLock"):
+                target = Path(self.profile_dir) / name
+                try:
+                    if target.exists() or target.is_symlink():
+                        target.unlink()
+                except OSError:
+                    pass
+
+    FlowApiClient._preread_flow_session_cookies = _container_preread_flow_session_cookies
 except Exception:
     pass
 

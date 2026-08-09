@@ -1,0 +1,4 @@
+interface:
+  display_name: "HBG Gemini Flow Suite"
+  short_description: "Docker 内运行 Gemini、Flow 与 Omni 图生视频"
+  default_prompt: "Use $hbg-gemini-flow-suite to authorize Flow and generate one Omni Flash reference-to-video clip from my image."

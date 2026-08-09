@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 import suite_cli
-from media_cleanup import retain_or_remove_original
+from media_cleanup import clean_video, retain_or_remove_original
+from scripts.cdp_bridge import rewrite_host_header
+from sync_auth import is_google_cookie
 
 
 class SuiteCliTests(unittest.TestCase):
@@ -59,6 +62,53 @@ class CleanupTests(unittest.TestCase):
 
             self.assertIsNone(retained)
             self.assertFalse(source.exists())
+
+    def test_gemini_diamond_retry_uses_original_after_no_mark_skip(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "gemini_web_video_sample.mp4"
+            output = root / "clean.mp4"
+            source.write_bytes(b"video")
+            commands: list[list[str]] = []
+
+            def fake_run_checked(command: list[str]) -> None:
+                commands.append(command)
+                destination = Path(command[command.index("--output") + 1])
+                destination.write_bytes(b"clean")
+
+            skipped = subprocess.CompletedProcess(
+                args=[], returncode=1, stdout="[SKIP] no visible mark\n", stderr=""
+            )
+            with patch("media_cleanup.subprocess.run", return_value=skipped), patch(
+                "media_cleanup.run_checked", side_effect=fake_run_checked
+            ):
+                self.assertEqual(clean_video(source, output), output.resolve())
+
+            diamond_command = commands[0]
+            self.assertEqual(
+                diamond_command[diamond_command.index("--input") + 1],
+                str(source.resolve()),
+            )
+            self.assertTrue(output.is_file())
+
+
+class FlowCompatibilityTests(unittest.TestCase):
+    def test_flow_auth_keeps_google_com_and_dot_google_cookies(self) -> None:
+        self.assertTrue(is_google_cookie({"domain": ".google.com"}))
+        self.assertTrue(is_google_cookie({"domain": "accounts.google.com"}))
+        self.assertTrue(is_google_cookie({"domain": "labs.google"}))
+        self.assertTrue(is_google_cookie({"domain": ".labs.google"}))
+        self.assertFalse(is_google_cookie({"domain": "example.com"}))
+
+    def test_cdp_bridge_rewrites_only_the_host_header(self) -> None:
+        request = (
+            b"GET /json/version HTTP/1.1\r\n"
+            b"Host: host.docker.internal:19223\r\n"
+            b"Connection: close\r\n\r\n"
+        )
+        rewritten = rewrite_host_header(request, 9223)
+        self.assertIn(b"Host: 127.0.0.1:9223", rewritten)
+        self.assertIn(b"GET /json/version HTTP/1.1", rewritten)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ services:
       platforms:
         - linux/amd64
       args:
-        GFLOW_VERSION: ${GFLOW_VERSION:-0.43.0}
+        GFLOW_VERSION: ${GFLOW_VERSION:-0.53.1}
         REMOVE_AI_WATERMARKS_VERSION: ${REMOVE_AI_WATERMARKS_VERSION:-0.19.0}
         VEO_VERSION: ${VEO_VERSION:-v0.6.4-demo}
         VEO_ARCHIVE: ${VEO_ARCHIVE:-GeminiWatermarkTool-Linux-x64-Video.zip}
@@ -45,6 +45,36 @@ services:
       IMAGE_CLEAN_BACKEND: ${IMAGE_CLEAN_BACKEND:-migan}
     ports:
       - 127.0.0.1:${NOVNC_PORT:-7900}:7900
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - suite-data:/data
+      - ${HOST_OUTPUT_DIR:-./outputs}:/data/outputs
+      - ${HOST_WORKSPACE_DIR:-.}:/workspace:ro
+
+  flow-runner:
+    image: local/hbg-gflow-arm64:${GFLOW_VERSION:-0.53.1}
+    platform: linux/arm64
+    profiles: ["flow-arm64"]
+    build:
+      context: .
+      dockerfile: Dockerfile.arm64-flow
+      platforms:
+        - linux/arm64
+      args:
+        GFLOW_VERSION: ${GFLOW_VERSION:-0.53.1}
+    shm_size: 2gb
+    environment:
+      HOME: /tmp
+      GFLOW_CLI_HOME: /data/gflow
+      GFLOW_CLI_OUTPUT_DIR: /data/outputs/flow
+      GFLOW_CLI_HEADLESS: ${GFLOW_CLI_HEADLESS:-true}
+      GFLOW_CLI_PREFER_CLASSIC: ${GFLOW_CLI_PREFER_CLASSIC:-true}
+      GFLOW_CONTAINER_CLEAR_STALE_SINGLETONS: "true"
+      GFLOW_CLI_PROXY_SERVER: ${CONTAINER_PROXY:-}
+      HTTP_PROXY: ${CONTAINER_PROXY:-}
+      HTTPS_PROXY: ${CONTAINER_PROXY:-}
+      NO_PROXY: localhost,127.0.0.1,::1,host.docker.internal,192.168.65.254
     extra_hosts:
       - host.docker.internal:host-gateway
     volumes:

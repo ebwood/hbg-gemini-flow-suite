@@ -57,7 +57,8 @@ Agent 可以完成环境检查和容器部署；Gemini 与 Flow 登录必须由�
 - **授权留在本机**：Cookie 只导入 Docker volume，不写入仓库或命令参数。
 - **适合批处理与 Agent**：可进入短视频、首尾帧连续生成和自动化工作流。
 - **输出可审计**：文件统一落盘，并附带 `result.json`。
-- **包含 Flow 兼容补丁**：已适配 2026 年 7 月 UI 选择器变化。
+- **包含 Flow 兼容补丁**：已适配 2026 年 8 月 References / 素材模式、`x1` 输出标签与新版提交按钮。
+- **Apple Silicon 原生 Flow runner**：自动使用 `linux/arm64` 执行 gflow，避免 x86 Chromium 在 ARM 模拟下崩溃。
 
 ## 📦 三步部署
 
@@ -68,7 +69,7 @@ Agent 可以完成环境检查和容器部署；Gemini 与 Flow 登录必须由�
 - 可访问 Gemini 与 Flow 的网络环境。
 - 具备对应 Gemini / Flow / Veo 权限和额度的 Google 账号。
 
-当前固定构建 `linux/amd64`。Apple Silicon 可通过 Docker Desktop 架构模拟运行，首次构建会更慢。
+主媒体容器仍固定为 `linux/amd64`，以保留 Gemini 和现有媒体后处理工具。Apple Silicon 会额外构建一个公开可复现的 `linux/arm64` Flow runner；`FLOW_RUNNER_MODE=auto` 会自动选择，不再让容器 Chromium 依赖 x86 模拟。
 
 ### 2. 克隆并启动
 
@@ -112,9 +113,14 @@ Gemini 使用 `Gemini-API` 所需的 Web Cookie；Flow 使用 `gflow-cli` 的独
 ./suite gemini video \
   "A slow cinematic push-in through a rainy neon street" \
   --out-dir gemini/videos/neon-street
+
+./suite gemini video \
+  "Animate this exact image as one slow cinematic shot" \
+  --image /workspace/reference.png \
+  --out-dir gemini/videos/image-to-video
 ```
 
-可附加 `--model MODEL`、`--keep-originals` 或 `--no-clean`。
+可附加 `--model MODEL`、一个或多个 `--image /workspace/...`、`--keep-originals` 或 `--no-clean`。
 
 ### Flow 图片
 
@@ -144,7 +150,17 @@ Gemini 使用 `Gemini-API` 所需的 Web Cookie；Flow 使用 `gflow-cli` 的独
   "A smooth continuous camera move" \
   --model veo-quality --duration 4 \
   --out-dir flow/videos/transition
+
+./suite flow video r2v \
+  "Animate this exact reference image as one continuous cinematic shot" \
+  --ref /workspace/reference.png \
+  --model omni-flash --duration 8 --aspect 16:9 --count 1 \
+  --out-dir flow/videos/reference-shot --json
 ```
+
+`video i2v` 对应首帧 / 尾帧控制；`video r2v` 对应 Flow 新版 **References / 素材** 模式。用户要求“把完整母图作为素材图生视频”时，应使用 `r2v --ref`，不要误用 `i2v --initial-frame`。
+
+只有日志依次确认素材上传、素材绑定、`send_prompt` 完成和生成接口返回 200，才算真正提交。仅进入编辑器或上传图片不代表已经开始生成。
 
 ### Flow 原生命令透传
 
@@ -211,6 +227,9 @@ cp .env.example .env
 | `NOVNC_PORT` | `7900` | 本机 noVNC 端口 |
 | `FLOW_CDP_PORT` | `9223` | Flow Chrome 调试端口 |
 | `GEMINI_CDP_PORT` | `9224` | Gemini Chrome 调试端口 |
+| `FLOW_CDP_BRIDGE_PORT` | `19223` | macOS Docker Desktop 临时 CDP 桥接端口 |
+| `GEMINI_CDP_BRIDGE_PORT` | `19224` | Gemini 授权使用的临时 CDP 桥接端口 |
+| `FLOW_RUNNER_MODE` | `auto` | `auto` / `arm64` / `amd64` Flow runner 选择 |
 | `HOST_PROXY` / `CONTAINER_PROXY` | 空 | 主机 / 容器代理 |
 | `REMOVE_VISIBLE_WATERMARKS` | `true` | 启用可见标记与元数据后处理 |
 | `KEEP_ORIGINALS` | `false` | 保留未处理原文件 |
@@ -239,13 +258,16 @@ CONTAINER_PROXY=http://host.docker.internal:10808
 
 ## ✅ 已验证环境
 
-2026-07-24 本地验证：
+2026-08-09 本地验证：
 
 - 容器健康运行，Gemini 与 Flow 两套持久化授权可用。
 - Gemini 图片与视频生成、下载和可选后处理完成。
 - Flow Nano Banana 2 图片生成、下载和可选后处理完成。
 - Flow Veo 3.1 Lite 视频生成、下载和可选后处理完成。
 - Flow 首帧 / 尾帧视频入口已适配 2026 年 7 月 UI。
+- Flow Omni Flash `video r2v` 已在 References / 素材模式实际提交，单参考图、16:9、8 秒、x1，生成接口返回 200。
+- Apple Silicon 原生 arm64 runner 已完成项目创建、Omni 模型选择、素材上传、提示词提交和生成轮询。
+- 授权同步同时保留 `*.google.com` 与 `*.google` Cookie，避免遗漏 `labs.google` 的 Flow 会话。
 
 Google 页面、模型名、额度策略和上游 CLI 都可能变化；“曾验证”不等于永久兼容。
 
@@ -253,18 +275,24 @@ Google 页面、模型名、额度策略和上游 CLI 都可能变化；“曾�
 
 ```text
 gemini-flow-suite/
+├── SKILL.md
+├── agents/openai.yaml
 ├── docs/showcase/hero.png
 ├── vendor/Gemini-API/
 ├── tests/
 ├── Dockerfile
+├── Dockerfile.arm64-flow
 ├── compose.yaml
 ├── suite
 ├── suite_cli.py
 ├── run_gemini.py
 ├── sync_auth.py
 ├── sitecustomize.py
+├── scripts/cdp_bridge.py
 └── media_cleanup.py
 ```
+
+仓库根目录同时是一个 Codex Skill。安装后可用 `$hbg-gemini-flow-suite` 触发部署、授权、Omni 素材图生视频和 Flow UI 兼容诊断流程。
 
 ## 🔐 安全与隐私
 

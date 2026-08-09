@@ -24,7 +24,7 @@ jobs:
         run: python -m unittest discover -s tests -v
 
       - name: Python syntax
-        run: python -m compileall -q suite_cli.py media_cleanup.py sync_auth.py sitecustomize.py
+        run: python -m compileall -q suite_cli.py media_cleanup.py sync_auth.py sitecustomize.py scripts/cdp_bridge.py
 
       - name: Shell syntax
         run: sh -n suite start-desktop.sh

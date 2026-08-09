@@ -7,8 +7,6 @@ import os
 import socket
 from pathlib import Path
 
-from playwright.async_api import async_playwright
-
 
 def resolved_endpoint(endpoint: str) -> str:
     if endpoint.startswith("http://host.docker.internal:"):
@@ -19,10 +17,21 @@ def resolved_endpoint(endpoint: str) -> str:
 
 def is_google_cookie(cookie: dict[str, object]) -> bool:
     domain = str(cookie.get("domain", "")).lstrip(".").lower()
-    return domain == "google.com" or domain.endswith(".google.com")
+    # Flow is hosted on Google's `.google` top-level domain (`labs.google`),
+    # while account cookies also live on `google.com`.  Keeping only the
+    # latter silently drops Flow's own session cookie after a successful
+    # OAuth callback and makes every Docker generation fail with 401.
+    return (
+        domain == "google.com"
+        or domain.endswith(".google.com")
+        or domain == "google"
+        or domain.endswith(".google")
+    )
 
 
 async def read_cdp_cookies(endpoint: str) -> list[dict[str, object]]:
+    from playwright.async_api import async_playwright
+
     async with async_playwright() as playwright:
         browser = await playwright.chromium.connect_over_cdp(resolved_endpoint(endpoint))
         contexts = browser.contexts
@@ -51,6 +60,8 @@ def save_gemini(cookies: list[dict[str, object]], target: Path) -> None:
 
 
 async def save_flow(cookies: list[dict[str, object]], gflow_home: Path, profile: str) -> None:
+    from playwright.async_api import async_playwright
+
     if not cookies:
         raise RuntimeError("Flow authorization is incomplete: no Google cookies were found")
 
@@ -64,7 +75,12 @@ async def save_flow(cookies: list[dict[str, object]], gflow_home: Path, profile:
             launch_options: dict[str, object] = {
                 "user_data_dir": str(profile_dir),
                 "executable_path": "/usr/bin/chromium",
-                "headless": True,
+                # Use a virtual display instead of Chromium's native headless
+                # mode.  On the arm64 Docker runner a persistent profile can
+                # launch successfully but never finish Playwright's startup
+                # handshake in native headless mode, leaving fresh host-CDP
+                # cookies unsaved.  `suite auth` wraps this process in Xvfb.
+                "headless": False,
                 "args": [
                     "--no-sandbox",
                     "--password-store=basic",
