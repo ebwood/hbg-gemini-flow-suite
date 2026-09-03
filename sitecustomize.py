@@ -66,7 +66,6 @@ try:
                 try:
                     response = await page.request.get(
                         routes.media_download_url(media_name),
-                        max_redirects=0,
                         timeout=30_000,
                     )
                     if response.status == 401:
