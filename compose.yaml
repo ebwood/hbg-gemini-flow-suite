@@ -10,7 +10,7 @@ services:
       platforms:
         - linux/amd64
       args:
-        GFLOW_VERSION: ${GFLOW_VERSION:-0.53.1}
+        GFLOW_VERSION: ${GFLOW_VERSION:-0.66.0}
         REMOVE_AI_WATERMARKS_VERSION: ${REMOVE_AI_WATERMARKS_VERSION:-0.19.0}
         VEO_VERSION: ${VEO_VERSION:-v0.6.4-demo}
         VEO_ARCHIVE: ${VEO_ARCHIVE:-GeminiWatermarkTool-Linux-x64-Video.zip}
@@ -53,7 +53,7 @@ services:
       - ${HOST_WORKSPACE_DIR:-.}:/workspace:ro
 
   flow-runner:
-    image: local/hbg-gflow-arm64:${GFLOW_VERSION:-0.53.1}
+    image: local/hbg-gflow-arm64:${GFLOW_VERSION:-0.66.0}
     platform: linux/arm64
     profiles: ["flow-arm64"]
     build:
@@ -62,7 +62,7 @@ services:
       platforms:
         - linux/arm64
       args:
-        GFLOW_VERSION: ${GFLOW_VERSION:-0.53.1}
+        GFLOW_VERSION: ${GFLOW_VERSION:-0.66.0}
     shm_size: 2gb
     environment:
       HOME: /tmp

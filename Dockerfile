@@ -16,9 +16,6 @@ RUN apt-get update \
 
 FROM --platform=linux/amd64 python:3.12-slim-bookworm
 
-ARG GFLOW_VERSION=0.53.1
-ARG REMOVE_AI_WATERMARKS_VERSION=0.19.0
-
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -42,9 +39,12 @@ RUN apt-get update \
     && ln -sf /usr/bin/chromium /opt/google/chrome/chrome \
     && python -m venv /opt/gflow-venv \
     && /opt/gflow-venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
-    && /opt/gflow-venv/bin/pip install --no-cache-dir "gflow-cli==${GFLOW_VERSION}" \
     && python -m venv /opt/gemini-venv \
-    && /opt/gemini-venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && /opt/gemini-venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel
+
+ARG GFLOW_VERSION=0.66.0
+ARG REMOVE_AI_WATERMARKS_VERSION=0.19.0
+RUN /opt/gflow-venv/bin/pip install --no-cache-dir "gflow-cli==${GFLOW_VERSION}" \
     && /opt/gemini-venv/bin/pip install --no-cache-dir \
       "remove-ai-watermarks[migan]==${REMOVE_AI_WATERMARKS_VERSION}"
 
