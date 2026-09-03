@@ -61,7 +61,7 @@ try:
             if terminal is not None:
                 return terminal
             now = time.monotonic()
-            if seen_count == 0 and now >= next_download_probe:
+            if now >= next_download_probe:
                 next_download_probe = now + 10
                 try:
                     response = await page.request.get(
