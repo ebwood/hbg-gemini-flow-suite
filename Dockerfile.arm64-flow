@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 FROM python:3.12-slim-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -8,17 +10,24 @@ ENV DEBIAN_FRONTEND=noninteractive \
     GFLOW_CLI_HEADLESS=true \
     GFLOW_CLI_PREFER_CLASSIC=true
 
-RUN apt-get update \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update \
     && apt-get install -y --no-install-recommends \
-      ca-certificates chromium chromium-sandbox tini xauth xvfb \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /opt/google/chrome /data/gflow /data/outputs /workspace \
+      ca-certificates chromium chromium-sandbox tini xauth xvfb
+
+RUN mkdir -p /opt/google/chrome /data/gflow /data/outputs /workspace \
     && ln -sf /usr/bin/chromium /opt/google/chrome/chrome \
-    && python3 -m venv /opt/gflow-venv \
-    && /opt/gflow-venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel
+    && python3 -m venv /opt/gflow-venv
+
+RUN --mount=type=cache,target=/var/cache/pip \
+    PIP_CACHE_DIR=/var/cache/pip \
+    /opt/gflow-venv/bin/pip install --upgrade pip setuptools wheel
 
 ARG GFLOW_VERSION=0.66.0
-RUN /opt/gflow-venv/bin/pip install --no-cache-dir "gflow-cli==${GFLOW_VERSION}"
+RUN --mount=type=cache,target=/var/cache/pip \
+    PIP_CACHE_DIR=/var/cache/pip \
+    /opt/gflow-venv/bin/pip install "gflow-cli==${GFLOW_VERSION}"
 
 COPY sitecustomize.py /tmp/gflow-container-hooks.py
 COPY gflow_container_hooks.pth /tmp/gflow_container_hooks.pth

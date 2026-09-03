@@ -49,6 +49,47 @@ except Exception:
     pass
 
 
+# Google can inject a site-wide cookie notice after the Flow editor has already
+# passed gflow's overlay check. The fixed bottom bar then covers the mode button
+# and Playwright waits for 30 seconds because it intercepts every pointer event.
+# Dismiss this specific banner immediately before opening either media menu.
+try:
+    from gflow_cli.api.transports.ui_automation import UiAutomationTransport
+    from gflow_cli.api.transports.ui_automation_video import VideoGenerationMixin
+
+    _original_switch_to_image_mode = UiAutomationTransport._switch_to_image_mode
+    _original_switch_to_video_mode = VideoGenerationMixin._switch_to_video_mode
+
+    async def _dismiss_google_cookie_notice(page):  # type: ignore[no-untyped-def]
+        notice = page.locator(".glue-cookie-notification-bar").first
+        if not await notice.is_visible():
+            return
+        reject = notice.locator("button.glue-cookie-notification-bar__reject").first
+        await reject.click(force=True)
+        await notice.wait_for(state="hidden", timeout=5_000)
+
+    async def _switch_to_image_mode_without_cookie_bar(
+        page, *, out_dir=None  # type: ignore[no-untyped-def]
+    ):
+        await _dismiss_google_cookie_notice(page)
+        await _original_switch_to_image_mode(page, out_dir=out_dir)
+
+    async def _switch_to_video_mode_without_cookie_bar(
+        page, *, out_dir=None  # type: ignore[no-untyped-def]
+    ):
+        await _dismiss_google_cookie_notice(page)
+        await _original_switch_to_video_mode(page, out_dir=out_dir)
+
+    UiAutomationTransport._switch_to_image_mode = staticmethod(
+        _switch_to_image_mode_without_cookie_bar
+    )
+    VideoGenerationMixin._switch_to_video_mode = staticmethod(
+        _switch_to_video_mode_without_cookie_bar
+    )
+except Exception:
+    pass
+
+
 # Flow's August 2026 editor labels the single-output tab ``x1``.  gflow-cli
 # Older automation probes only the ``1x`` spelling, then silently leaves the
 # editor default (x2) in place and doubles credit use.  Select the requested
