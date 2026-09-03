@@ -295,6 +295,41 @@ authorize() {
   echo "${provider} authorization completed."
 }
 
+recover_flow_video() {
+  media_id=${1:-}
+  target=${2:-}
+  wait_seconds=${3:-0}
+  if [ -z "$media_id" ] || [ -z "$target" ]; then
+    echo "usage: $0 recover-flow-video MEDIA_ID /data/outputs/FILE.mp4 [WAIT_SECONDS]" >&2
+    exit 2
+  fi
+
+  start_chrome "$state_dir/flow-chrome" "$FLOW_CDP_PORT" \
+    "https://labs.google/fx/tools/flow?hl=en" headless
+  docker_cdp_endpoint "$FLOW_CDP_PORT" "$FLOW_CDP_BRIDGE_PORT"
+  endpoint=$CDP_ENDPOINT
+  if use_arm64_flow_runner; then
+    ensure_flow_runner
+    if compose --profile flow-arm64 run --rm --no-deps \
+      --entrypoint /opt/gflow-venv/bin/python \
+      -e GFLOW_CLI_CDP_ENDPOINT="$endpoint" \
+      flow-runner /app/recover_flow_video.py "$media_id" "$target" "$wait_seconds"; then
+      recover_status=0
+    else
+      recover_status=$?
+    fi
+  elif docker exec -e GFLOW_CLI_CDP_ENDPOINT="$endpoint" \
+    "$container_name" /opt/gflow-venv/bin/python /app/recover_flow_video.py \
+    "$media_id" "$target" "$wait_seconds"; then
+    recover_status=0
+  else
+    recover_status=$?
+  fi
+  stop_cdp_bridge "$FLOW_CDP_BRIDGE_PORT"
+  stop_cdp_browser "$FLOW_CDP_PORT"
+  return "$recover_status"
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -309,6 +344,7 @@ Usage:
   suite flow video i2v --initial-frame /workspace/start.png "prompt" [options]
   suite flow video r2v "prompt" --ref /workspace/ref.png [options]
   suite flow raw <any gflow command>
+  suite recover-flow-video MEDIA_ID /data/outputs/FILE.mp4 [WAIT_SECONDS]
   suite clean image|video INPUT OUTPUT
 EOF
 }
@@ -338,6 +374,9 @@ case "$command" in
     ;;
   auth)
     authorize "${1:-}"
+    ;;
+  recover-flow-video)
+    recover_flow_video "$@"
     ;;
   flow)
     endpoint=

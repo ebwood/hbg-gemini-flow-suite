@@ -32,6 +32,92 @@ except Exception:
     pass
 
 
+# Flow's current Omni editor sometimes returns a media ID but never starts its
+# usual status polling request. Probe the media redirect as a completion signal
+# so a successful generation is downloaded instead of timing out after 10 min.
+try:
+    import time
+
+    from gflow_cli.api import routes
+    from gflow_cli.api.transports import ui_automation_video
+    from gflow_cli.api.transports.ui_automation_video import VideoGenerationMixin
+    from gflow_cli.api.video import VideoStatus
+    from gflow_cli.errors import AuthExpiredError
+
+    async def _poll_video_status_with_download_probe(
+        page, captured_status, media_name, *, timeout_s=600.0,
+        poll_interval_s=2.0, stall_nudge_s=120.0,
+    ):  # type: ignore[no-untyped-def]
+        deadline = time.monotonic() + timeout_s
+        last_status = None
+        seen_count = len(captured_status)
+        last_progress = time.monotonic()
+        nudged = False
+        next_download_probe = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            terminal, last_status = VideoGenerationMixin._scan_for_terminal_status(
+                captured_status, media_name
+            )
+            if terminal is not None:
+                return terminal
+            now = time.monotonic()
+            if seen_count == 0 and now >= next_download_probe:
+                next_download_probe = now + 10
+                try:
+                    response = await page.request.get(
+                        routes.media_download_url(media_name),
+                        max_redirects=0,
+                        timeout=30_000,
+                    )
+                    if response.status == 401:
+                        raise AuthExpiredError(
+                            detail="media redirect returned HTTP 401 while polling video",
+                            status=401,
+                            route="media.getMediaUrlRedirect",
+                        )
+                    if response.status == 200 or 300 <= response.status < 400:
+                        ui_automation_video.log.info(
+                            "ui_automation_video.poll_terminal",
+                            media_name=media_name,
+                            status="MEDIA_GENERATION_STATUS_SUCCESSFUL",
+                            source="media_redirect",
+                        )
+                        return VideoStatus(
+                            media_id=media_name,
+                            status="MEDIA_GENERATION_STATUS_SUCCESSFUL",
+                        )
+                except AuthExpiredError:
+                    raise
+                except Exception as error:
+                    ui_automation_video.log.debug(
+                        "ui_automation_video.media_redirect_probe_failed",
+                        media_name=media_name,
+                        error=str(error),
+                    )
+            seen_count, last_progress, nudged = (
+                await VideoGenerationMixin._nudge_tab_if_stalled(
+                    page, captured_status, seen_count, last_progress, nudged,
+                    stall_nudge_s, media_name,
+                )
+            )
+            await asyncio.sleep(poll_interval_s)
+        cause = (
+            "Flow never polled the status route"
+            if seen_count == 0
+            else "Flow stopped polling before a terminal status"
+        )
+        raise TimeoutError(
+            f"no terminal status for {media_name!r} within {timeout_s:.0f}s — "
+            f"{seen_count} status response(s) seen, last status: {last_status}. {cause}."
+        )
+
+    VideoGenerationMixin._poll_video_status = staticmethod(
+        _poll_video_status_with_download_probe
+    )
+except Exception:
+    pass
+
+
 # Flow's July 2026 editor cohort changed the I2V Start/End frame slots from
 # custom ``div[type=button]`` elements to native iconless ``button`` elements.
 # Some gflow releases still carry only the older selector, so extend it without

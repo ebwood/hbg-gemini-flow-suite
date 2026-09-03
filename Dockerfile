@@ -1,12 +1,15 @@
-FROM --platform=linux/amd64 debian:bookworm-slim AS veo-tool
+# syntax=docker/dockerfile:1
+
+FROM debian:bookworm-slim AS veo-tool
 
 ARG VEO_VERSION=v0.6.4-demo
 ARG VEO_ARCHIVE=GeminiWatermarkTool-Linux-x64-Video.zip
 ARG VEO_SHA256=dd6d27547cee59555a87e720c8ef41c68373d78f94356cca31ab817b43d74f9b
 
-RUN apt-get update \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl unzip \
-    && rm -rf /var/lib/apt/lists/* \
     && curl --fail --location --retry 3 \
       "https://github.com/allenk/VeoWatermarkRemover/releases/download/${VEO_VERSION}/${VEO_ARCHIVE}" \
       --output "/tmp/${VEO_ARCHIVE}" \
@@ -14,7 +17,7 @@ RUN apt-get update \
     && unzip -q "/tmp/${VEO_ARCHIVE}" -d /tmp/veo \
     && install -m 0755 /tmp/veo/GeminiWatermarkTool-Video /veo-watermark-remover
 
-FROM --platform=linux/amd64 python:3.12-slim-bookworm
+FROM python:3.12-slim-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -29,28 +32,41 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONPATH=/opt/Gemini-API/src:/app \
     MEDIA_OUTPUT_ROOT=/data/outputs
 
-RUN apt-get update \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update \
     && apt-get install -y --no-install-recommends \
       ca-certificates chromium curl ffmpeg fluxbox fonts-noto-cjk fonts-liberation \
       libdbus-1-3 libgl1 libgomp1 libstdc++6 novnc procps tini websockify \
-      x11vnc xauth xvfb \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /opt/google/chrome \
+      x11vnc xauth xvfb
+
+RUN mkdir -p /opt/google/chrome \
     && ln -sf /usr/bin/chromium /opt/google/chrome/chrome \
     && python -m venv /opt/gflow-venv \
-    && /opt/gflow-venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
-    && python -m venv /opt/gemini-venv \
-    && /opt/gemini-venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel
+    && python -m venv /opt/gemini-venv
+
+RUN --mount=type=cache,target=/var/cache/pip \
+    PIP_CACHE_DIR=/var/cache/pip \
+    /opt/gflow-venv/bin/pip install --upgrade pip setuptools wheel \
+    && PIP_CACHE_DIR=/var/cache/pip \
+      /opt/gemini-venv/bin/pip install --upgrade pip setuptools wheel
 
 ARG GFLOW_VERSION=0.66.0
+RUN --mount=type=cache,target=/var/cache/pip \
+    PIP_CACHE_DIR=/var/cache/pip \
+    /opt/gflow-venv/bin/pip install "gflow-cli==${GFLOW_VERSION}"
+
 ARG REMOVE_AI_WATERMARKS_VERSION=0.19.0
-RUN /opt/gflow-venv/bin/pip install --no-cache-dir "gflow-cli==${GFLOW_VERSION}" \
-    && /opt/gemini-venv/bin/pip install --no-cache-dir \
+RUN --mount=type=cache,target=/var/cache/pip \
+    PIP_CACHE_DIR=/var/cache/pip \
+    /opt/gemini-venv/bin/pip install \
       "remove-ai-watermarks[migan]==${REMOVE_AI_WATERMARKS_VERSION}"
 
 COPY --from=veo-tool /veo-watermark-remover /usr/local/bin/veo-watermark-remover
 COPY vendor/Gemini-API /opt/Gemini-API
-RUN /opt/gemini-venv/bin/pip install --no-cache-dir /opt/Gemini-API
+RUN --mount=type=cache,target=/var/cache/pip \
+    PIP_CACHE_DIR=/var/cache/pip \
+    /opt/gemini-venv/bin/pip install /opt/Gemini-API
 
 WORKDIR /app
 
@@ -58,6 +74,7 @@ COPY run_gemini.py /app/run_gemini.py
 COPY media_cleanup.py /app/media_cleanup.py
 COPY suite_cli.py /app/suite_cli.py
 COPY sync_auth.py /app/sync_auth.py
+COPY recover_flow_video.py /app/recover_flow_video.py
 COPY start-desktop.sh /app/start-desktop.sh
 COPY sitecustomize.py /tmp/gflow-container-hooks.py
 COPY gflow_container_hooks.pth /tmp/gflow_container_hooks.pth

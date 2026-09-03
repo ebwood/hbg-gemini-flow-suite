@@ -32,6 +32,7 @@ RUN --mount=type=cache,target=/var/cache/pip \
 COPY sitecustomize.py /tmp/gflow-container-hooks.py
 COPY gflow_container_hooks.pth /tmp/gflow_container_hooks.pth
 COPY sync_auth.py /app/sync_auth.py
+COPY recover_flow_video.py /app/recover_flow_video.py
 
 RUN site_packages="$(/opt/gflow-venv/bin/python -c 'import site; print(site.getsitepackages()[0])')" \
     && install -m 0644 /tmp/gflow-container-hooks.py "${site_packages}/gflow_container_hooks.py" \
